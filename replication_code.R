@@ -2,7 +2,6 @@
 ### REPLICATION CODE FOR MACROECONOMETRICS ###
 ##############################################
 
-
 # Packages ----------------------------------------------------------------
 
 install.packages(c("BVAR", "dplyr", "tsibble", "tidyverse"))
@@ -15,13 +14,18 @@ library(MinnesotaPrior)  # For Minnesota priors
 
 # Import clean data -------------------------------------------------------
 
-
 data <- readRDS("~/work/macro_enconometrics_ensae/1_clean_data/data_clean.rds")
 
+# export data in csv
+# write.csv(data, "data_clean.csv", row.names = FALSE)
+
+# convert in time series
 data_ts <- ts(data %>% select(-date), start = c(2002, 1), frequency = 4)
 
+# name of variables used in the model
 vars <- c("hicp_ecb", "gdp_growth_log", "gscpi", "avg_shadow_rate", "log_deflated_price", "deficit")
 
+# convert data in matrix
 data_matrix <- as.matrix(data[, c(
   "avg_shadow_rate", 
   "log_deflated_price", 
@@ -31,19 +35,29 @@ data_matrix <- as.matrix(data[, c(
   "gdp_growth_log"
 )])
 
-
 # Define priors and parameters --------------------------------------------
 
 lags <- 4
 
-mn_priors <- bv_mn(lambda = bv_lambda(mode = 0.2),  # Tightness parameter
-                   alpha = bv_alpha(mode = 2),     # Lag decay
-                   psi = bv_psi(scale = 0.004))   # Variance of other variables
+# Define the standard Minnesota prior
+mn_priors <- bv_mn(
+  lambda = bv_lambda(mode = 0.2, sd = 0.4, min = 0.0001, max = 5),  # Overall tightness
+  alpha = bv_alpha(mode = 2, sd = 0.25, min = 1, max = 3),         # Lag decay
+  psi = bv_psi(scale = 0.004, shape = 0.004)                      # Cross-variable variance
+)
 
-priors <- bv_priors(hyper = "auto", mn = mn_priors)
-
+# Combine the Minnesota prior with other settings into a prior object
+priors <- bv_priors(
+  hyper = "auto",  # Treat Minnesota parameters as hyperparameters
+  mn = mn_priors
+)
 
 # Estimate the model ------------------------------------------------------
+
+# The BVAR package uses Giannone, Lenza and Primiceri (2015) method by default.
+
+# However, in our article, it's the Lenza and Primiceri (2022) model that is used
+# Lenza and Primiceri (2022) model takes into account for COVID additionnal volatility
 
 bvar_model <- bvar(
   data = data_matrix,
@@ -55,15 +69,16 @@ bvar_model <- bvar(
   verbose = TRUE
 )
 
-# Plot density
-plot(bvar_model, type = "dens",
-     vars_response = "gscpi", vars_impulse = "gdp_growth_log")
-
 # Plot residuals
 plot(residuals(bvar_model, type = "mean"))
 
+# Plot de posterior density of lambda
+lambda_density <- density(bvar_model, vars = "lambda")
+plot(lambda_density, main = "Densité a posteriori de lambda")
+
 # Define sign restrictions matrix -----------------------------------------
 
+# definition of the same sign restriction matrix as in the article
 sign_restriction_matrix <- matrix(c(
   1, 1, 1, -1, -1, -1,    # GDP growth
   1, 1, 1, 1, 1, 1,       # Inflation
@@ -86,19 +101,19 @@ print(sign_restriction_matrix)
 
 # Impulse response functions ----------------------------------------------
 
+# define the settings
 irf_settings <- bv_irf(
   horizon = 4,            # Horizon of 12 quarters
   identification = TRUE,   # Enable identification
   sign_restr = sign_restriction_matrix,
   sign_lim=3000)
 
-# Calculate IRFs
+# Calculate IRFs (NOT WORKING)
 irf_results <- irf(bvar_model, irf_settings)
 
 # Plot IRFs
 plot(irf(bvar_model), area = TRUE,
      vars_impulse = c("avg_shadow_rate", "deficit"), vars_response = c(1:2, 6))
-
 
 
 # Forecast ----------------------------------------------------------------
